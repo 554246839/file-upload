@@ -138,7 +138,7 @@ router.post('/api/upload/merge', function uploadFile(ctx) {
     }
   } else {
     const chunks = fs.readdirSync(dirPath) // 读取所有切片文件
-    fs.createWriteStream(filePath) // 创建可写存储文件
+    const fileWriteStream = fs.createWriteStream(filePath) // 创建可写存储文件
     
     if(chunks.length !== total || !chunks.length) {
       ctx.response.body = {
@@ -155,6 +155,8 @@ router.post('/api/upload/merge', function uploadFile(ctx) {
     }
     // 然后再删除切片文件夹
     fs.rmdirSync(dirPath)
+    // 默认情况下不需要手动关闭，但是在某些文件的合并并不会自动关闭可写流，比如压缩文件，所以这里在合并完成之后，统一关闭下
+    fileWriteStream.close()
     // 合并文件成功
     ctx.response.body = {
       code: 0,
