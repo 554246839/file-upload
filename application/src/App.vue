@@ -37,8 +37,6 @@ export default {
       })
     },
     async uploadFile(e) {
-      console.time('整传')
-      console.time('分片')
       const file = e.target.files[0]
       this.precent = 0
       this.uploadedChunkSize = 0
@@ -49,7 +47,6 @@ export default {
         const chunkInfo = await this.cutBlob(file)
         this.remainChunks = chunkInfo.chunkArr
         this.fileInfo = chunkInfo.fileInfo
-        // console.log(chunkInfo, 'chunkInfo')
 
         this.mergeRequest()
       }
@@ -114,9 +111,14 @@ export default {
           return Promise.resolve()
         }
 
-        let it = this.sendChunk(arr.shift())
+        const chunkItem = arr.shift()
+        const it = this.sendChunk(chunkItem)
         it.then(() => {
           fetchArr.splice(fetchArr.indexOf(it), 1)
+        }, err => {
+          this.isStop = true
+          arr.unshift(chunkItem)
+          Promise.reject(err)
         })
         fetchArr.push(it)
 
@@ -133,10 +135,11 @@ export default {
           callback()
         })
       }, err => {
-          console.log(err)
+        console.log(err)
       })
     },
     sendChunk(item) {
+      if (!item) return
       let formdata = new FormData()
       formdata.append("file", item.chunk)
       formdata.append("hash", item.hash)
@@ -154,7 +157,6 @@ export default {
           this.uploadedChunkSize > item.size && (this.uploadedChunkSize = item.size)
 
           this.precent = (this.uploadedChunkSize / item.size).toFixed(2) * 1000 / 10
-          // console.log(this.precent, this.uploadedChunkSize, item.size)
         }
       })
     },
@@ -168,7 +170,6 @@ export default {
         data: formdata,
         headers: { "Content-Type": "multipart/form-data" }
       }).then(({ data }) => {
-        console.timeEnd('整传')
         console.log(data, 'upload/file')
       })
     },
@@ -178,7 +179,6 @@ export default {
         method: "post",
         data,
       }).then(res => {
-        console.timeEnd('分片')
         console.log(res.data)
       })
     }

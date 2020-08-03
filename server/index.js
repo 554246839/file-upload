@@ -8,6 +8,10 @@ const static = require('koa-static')
 
 const uploadPath = path.join(__dirname, 'public/uploads') // 文件上传目录
 
+if (!fs.existsSync(uploadPath)) {
+  fs.mkdirSync(uploadPath)
+}
+
 // 创建一个Koa对象表示web app本身:
 const app = new Koa();
 
@@ -73,14 +77,17 @@ router.post('/api/upload/snippet', function snippet(ctx) {
 
   // 切片上传目录
   const chunksPath = path.join(uploadPath, hash, '/')
-  // 切片文件
-  const chunksFileName = chunksPath + hash + '-' + index
 
   if(!fs.existsSync(chunksPath)) {
     fs.mkdirSync(chunksPath)
   }
+
+  // 切片文件
+  const chunksFileName = chunksPath + hash + '-' + index
+  
   // 秒传，如果切片已上传，则立即返回
   if (fs.existsSync(chunksFileName)) {
+    console.log('秒传')
     ctx.response.body = {
       code: 0,
       msg: '切片上传完成'
@@ -144,10 +151,10 @@ router.post('/api/upload/merge', function uploadFile(ctx) {
       // 将切片追加到存储文件
       fs.appendFileSync(filePath, fs.readFileSync(dirPath + hash + '-' + i))
       // 然后删除切片
-      // fs.unlinkSync(dirPath + hash + '-' + i)
+      fs.unlinkSync(dirPath + hash + '-' + i)
     }
     // 然后再删除切片文件夹
-    // fs.rmdirSync(dirPath)
+    fs.rmdirSync(dirPath)
     // 合并文件成功
     ctx.response.body = {
       code: 0,
