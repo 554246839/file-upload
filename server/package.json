@@ -6,7 +6,8 @@
     "koa-multer": "^1.0.2",
     "koa-router": "^9.1.0",
     "koa-static": "^5.0.0",
-    "path": "^0.12.7"
+    "path": "^0.12.7",
+    "querystring": "^0.2.0"
   },
   "name": "demo-test",
   "version": "1.0.0",

@@ -38,8 +38,10 @@ export default {
     },
     async uploadFile(e) {
       const file = e.target.files[0]
+      console.log(file)
       this.precent = 0
       this.uploadedChunkSize = 0
+      // this.sendFile(file)
       // 如果文件大于分片大小5倍，则进行分片上传
       if (file.size < this.chunkSize * 5) {
         this.sendFile(file)
@@ -90,6 +92,7 @@ export default {
             chunkArr,
             fileInfo: {
               hash,
+              total: chunkNums,
               name: file.name,
               size: file.size
             }

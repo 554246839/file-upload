@@ -19,14 +19,6 @@ app.use(static('public', {
   maxAge: 30 * 24 * 3600 * 1000 // 静态资源缓存时间 ms
 }));
 
-app.use(koaBody({
-  multipart: true,
-  formidable: {
-    uploadDir: uploadPath,
-    maxFileSize: 10000 * 1024 * 1024    // 设置上传文件大小最大限制，默认20M
-  }
-}))
-
 // 对于任何请求，app将调用该异步函数处理请求：
 app.use(async (ctx, next) => {
   console.log(`Process ${ctx.request.method} ${ctx.request.url}...`);
@@ -46,33 +38,120 @@ app.use(async (ctx, next) => {
     console.log(err, 'errmessage')
     ctx.response.status = err.statusCode || err.status || 500
     ctx.response.body = {
-      errcode: 500,
+      code: 500,
       msg: err.message
     }
     ctx.app.emit('error', err, ctx);
   }
 })
 
-router.post('/api/upload/file', function uploadFile(ctx) {
-  const files = ctx.request.files
-  const filePath = path.join(uploadPath, files.file.name)
-
-  // 创建可读流
-  const reader = fs.createReadStream(files['file']['path']);
-  // 创建可写流
-  const upStream = fs.createWriteStream(filePath);
-  // 可读流通过管道写入可写流
-  reader.pipe(upStream);
-
-  ctx.response.body = {
-    code: 0,
-    url: path.join('http://localhost:3000/uploads', files.file.name),
-    msg: '文件上传成功'
+app.use(koaBody({
+  multipart: true,
+  formidable: {
+    // keepExtensions: true,
+    uploadDir: uploadPath,
+    maxFileSize: 10000 * 1024 * 1024    // 设置上传文件大小最大限制，默认20M
   }
+}))
+
+// 删除文件夹及内部所有文件
+function deleteFiles(dirpath) {
+  console.log(dirpath)
+  if (fs.existsSync(dirpath)) {
+    fs.readdir(dirpath, (err, files) => {
+      if (err) throw err
+      while(files.length) {
+        fs.unlinkSync(dirpath + files.shift())
+      }
+      fs.rmdir(dirpath, () => {})
+    })
+  }
+}
+
+// 文件上传处理
+function uploadFn(ctx, destPath) {
+  return new Promise((resolve, reject) => {
+    const { name, path: _path } = ctx.request.files.file
+    const filePath = destPath || path.join(uploadPath, name)
+
+    fs.rename(_path, filePath, (err) => {
+      if (err) {
+        return reject(err)
+      }
+      resolve(name)
+    })
+  })
+}
+
+/**
+ * 文件异步合并
+ * @param {String} dirPath 分片文件夹
+ * @param {String} filePath 目标文件
+ * @param {String} hash 文件hash
+ * @param {Number} total 分片文件总数
+ * @returns {Promise}
+ */
+function mergeFile(dirPath, filePath, hash, total) {
+  return new Promise((resolve, reject) => {
+    fs.readdir(dirPath, (err, files) => {
+      if (err) {
+        return reject(err)
+      }
+      if(files.length !== total || !files.length) {
+        return reject('上传失败，切片数量不符')
+      }
+
+      const fileWriteStream = fs.createWriteStream(filePath)
+      function merge(i) {
+        return new Promise((res, rej) => {
+          // 合并完成
+          if (i === files.length) {
+            fs.rmdir(dirPath, (err) => {
+              console.log(err, 'rmdir')
+            })
+            return res()
+          }
+          const chunkpath = dirPath + hash + '-' + i
+          fs.readFile(chunkpath, (err, data) => {
+            if (err) return rej(err)
+
+            // 将切片追加到存储文件
+            fs.appendFile(filePath, data, () => {
+              // 删除切片文件
+              fs.unlink(chunkpath, () => {
+                // 递归合并
+                res(merge(i + 1))
+              })
+            })
+          })
+
+        })
+      }
+      merge(0).then(() => {
+        // 默认情况下不需要手动关闭，但是在某些文件的合并并不会自动关闭可写流，比如压缩文件，所以这里在合并完成之后，统一关闭下
+        resolve(fileWriteStream.close())
+      })
+    })
+  })
+}
+
+router.post('/api/upload/file', async function uploadFile(ctx) {
+  await uploadFn(ctx).then((name) => {
+    ctx.body = {
+      code: 0,
+      url: path.join('http://localhost:3000/uploads', name),
+      msg: '文件上传成功'
+    }
+  }).catch(err => {
+    console.log(err)
+    ctx.body = {
+      code: -1,
+      msg: '文件上传失败'
+    }
+  })
 })
 
-router.post('/api/upload/snippet', function snippet(ctx) {
-  let files = ctx.request.files
+router.post('/api/upload/snippet', async function snippet(ctx) {
   const { index, hash } = ctx.request.body
 
   // 切片上传目录
@@ -84,32 +163,19 @@ router.post('/api/upload/snippet', function snippet(ctx) {
 
   // 切片文件
   const chunksFileName = chunksPath + hash + '-' + index
-  
-  // 秒传，如果切片已上传，则立即返回
-  if (fs.existsSync(chunksFileName)) {
-    console.log('秒传')
-    ctx.response.body = {
+
+  await uploadFn(ctx, chunksFileName).then(name => {
+    ctx.body = {
       code: 0,
       msg: '切片上传完成'
     }
-    return
-  }
-  // 创建可读流
-  const reader = fs.createReadStream(files.file.path);
-  // 创建可写流
-  const upStream = fs.createWriteStream(chunksFileName);
-  // // 可读流通过管道写入可写流
-  reader.pipe(upStream);
-
-  reader.on('end', () => {
-    // 文件上传成功后，删除本地切片
-    fs.unlinkSync(files.file.path)
+  }).catch(err => {
+    console.log(err)
+    ctx.body = {
+      code: -1,
+      msg: '切片上传失败'
+    }
   })
-    
-  ctx.response.body = {
-    code: 0,
-    msg: '切片上传完成'
-  }
 })
 
 /**
@@ -118,51 +184,38 @@ router.post('/api/upload/snippet', function snippet(ctx) {
  * 4、然后合并切片
  * 5、删除切片文件信息
  */
-router.post('/api/upload/merge', function uploadFile(ctx) {
+router.post('/api/upload/merge', async function uploadFile(ctx) {
   const { total, hash, name } = ctx.request.body
   const dirPath = path.join(uploadPath, hash, '/')
   const filePath = path.join(uploadPath, name) // 合并文件
 
   // 已存在文件，则表示已上传成功
   if (fs.existsSync(filePath)) {
-    ctx.response.body = {
+    deleteFiles(dirPath)
+    ctx.body = {
       code: 0,
       url: path.join('http://localhost:3000/uploads', name),
       msg: '文件上传成功'
     }
   // 如果没有切片hash文件夹则表明上传失败
   } else if (!fs.existsSync(dirPath)) {
-    ctx.response.body = {
+    ctx.body = {
       code: -1,
       msg: '文件上传失败'
     }
   } else {
-    const chunks = fs.readdirSync(dirPath) // 读取所有切片文件
-    const fileWriteStream = fs.createWriteStream(filePath) // 创建可写存储文件
-    
-    if(chunks.length !== total || !chunks.length) {
-      ctx.response.body = {
-        code: -1,
-        msg: '上传失败，切片数量不符'
+    await mergeFile(dirPath, filePath, hash, total).then(() => {
+      ctx.body = {
+        code: 0,
+        url: path.join('http://localhost:3000/uploads', name),
+        msg: '文件上传成功'
       }
-    }
-
-    for(let i = 0; i < chunks.length; i++) {
-      // 将切片追加到存储文件
-      fs.appendFileSync(filePath, fs.readFileSync(dirPath + hash + '-' + i))
-      // 然后删除切片
-      fs.unlinkSync(dirPath + hash + '-' + i)
-    }
-    // 然后再删除切片文件夹
-    fs.rmdirSync(dirPath)
-    // 默认情况下不需要手动关闭，但是在某些文件的合并并不会自动关闭可写流，比如压缩文件，所以这里在合并完成之后，统一关闭下
-    fileWriteStream.close()
-    // 合并文件成功
-    ctx.response.body = {
-      code: 0,
-      url: path.join('http://localhost:3000/uploads', name),
-      msg: '文件上传成功'
-    }
+    }).catch(err => {
+      ctx.body = {
+        code: -1,
+        msg: err
+      }
+    })
   }
 })
 
