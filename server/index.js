@@ -56,7 +56,6 @@ app.use(koaBody({
 
 // 删除文件夹及内部所有文件
 function deleteFiles(dirpath) {
-  console.log(dirpath)
   if (fs.existsSync(dirpath)) {
     fs.readdir(dirpath, (err, files) => {
       if (err) throw err
@@ -135,6 +134,7 @@ function mergeFile(dirPath, filePath, hash, total) {
   })
 }
 
+// 单文件上传接口
 router.post('/api/upload/file', async function uploadFile(ctx) {
   await uploadFn(ctx).then((name) => {
     ctx.body = {
@@ -151,6 +151,28 @@ router.post('/api/upload/file', async function uploadFile(ctx) {
   })
 })
 
+// 查询分片文件是否上传
+router.post('/api/upload/checkSnippet', async function snippet(ctx) {
+  const { hash } = ctx.request.body
+
+  // 切片上传目录
+  const chunksPath = path.join(uploadPath, hash, '/')
+
+  let chunksFiles = []
+
+  if(fs.existsSync(chunksPath)) {
+    // 切片文件
+    chunksFiles = fs.readdirSync(chunksPath)
+  }
+
+  ctx.body = {
+    code: 0,
+    data: chunksFiles,
+    msg: '查询成功'
+  }
+})
+
+// 分片文件上传接口
 router.post('/api/upload/snippet', async function snippet(ctx) {
   const { index, hash } = ctx.request.body
 
@@ -163,7 +185,7 @@ router.post('/api/upload/snippet', async function snippet(ctx) {
 
   // 切片文件
   const chunksFileName = chunksPath + hash + '-' + index
-
+  
   await uploadFn(ctx, chunksFileName).then(name => {
     ctx.body = {
       code: 0,
@@ -179,6 +201,7 @@ router.post('/api/upload/snippet', async function snippet(ctx) {
 })
 
 /**
+ * 文件合并接口
  * 1、判断是否有切片hash文件夹
  * 2、判断文件夹内的文件数量是否等于total
  * 4、然后合并切片
