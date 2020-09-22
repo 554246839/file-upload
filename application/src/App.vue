@@ -36,12 +36,12 @@ export default {
         this.chunkMerge(fileInfo)
       })
     },
+    // 执行文件上传开始
     async uploadFile(e) {
       const file = e.target.files[0]
-      console.log(file)
       this.precent = 0
       this.uploadedChunkSize = 0
-      // this.sendFile(file)
+
       // 如果文件大于分片大小5倍，则进行分片上传
       if (file.size < this.chunkSize * 5) {
         this.sendFile(file)
@@ -50,9 +50,29 @@ export default {
         this.remainChunks = chunkInfo.chunkArr
         this.fileInfo = chunkInfo.fileInfo
 
-        this.mergeRequest()
+        // 请求已上传文件
+        this.getUploadedChunks(this.fileInfo.hash).then(({data: res}) => {
+          const { code, data } = res
+          if (code === 0) {
+            if (data.length) {
+              // 过滤已上传文件
+              this.remainChunks = this.remainChunks.filter(item => {
+                if (data.indexOf(item.hash + '-' + item.index) > -1) {
+                  this.uploadedChunkSize += item.chunk.size
+                  return false
+                } else {
+                  return true
+                }
+              })
+              // 重新计算百分比
+              this.calcPrecent(this.fileInfo.size)
+              this.mergeRequest()
+            }
+          }
+        })
       }
     },
+    // 文件分割
     cutBlob(file) {
       const chunkArr = [] // 所有切片缓存数组
       const blobSlice = File.prototype.slice || File.prototype.mozSlice || File.prototype.webkitSlice
@@ -65,7 +85,7 @@ export default {
         reader.addEventListener('loadend', () => {
           const content = reader.result
 
-          spark.append(content)
+          spark.append(content) // 耗时大，抽样计算或者web worker计算
           const hash = spark.end()
 
           let startIndex = ''
@@ -103,6 +123,7 @@ export default {
         })
       })
     },
+    // 请求并发处理
     sendRequest(arr, max = 6, callback) {
       let fetchArr = []
 
@@ -141,6 +162,11 @@ export default {
         console.log(err)
       })
     },
+    // 百分比计算
+    calcPrecent(total) {
+      this.precent = (this.uploadedChunkSize / total).toFixed(2) * 1000 / 10
+    },
+    // 小文件上传
     sendChunk(item) {
       if (!item) return
       let formdata = new FormData()
@@ -159,10 +185,19 @@ export default {
           this.uploadedChunkSize += loaded < total ? 0 : +loaded
           this.uploadedChunkSize > item.size && (this.uploadedChunkSize = item.size)
 
-          this.precent = (this.uploadedChunkSize / item.size).toFixed(2) * 1000 / 10
+          this.calcPrecent(item.size)
         }
       })
     },
+    // 请求已上传文件
+    getUploadedChunks(hash) {
+      return this.$http({
+        url: "/upload/checkSnippet",
+        method: "post",
+        data: { hash }
+      })
+    },
+    // 单文件上传
     sendFile(file) {
       let formdata = new FormData()
       formdata.append("file", file)
@@ -176,6 +211,7 @@ export default {
         console.log(data, 'upload/file')
       })
     },
+    // 请求合并
     chunkMerge(data) {
       this.$http({
         url: "/upload/merge",
