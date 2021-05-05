@@ -24,5 +24,17 @@ module.exports = {
     }
     // 下边这个， 如果你是本地自己mock 的话用after这个属性，线上环境一定要干掉
     // after: require("./mock/mock-server.js")
+  },
+  configureWebpack: config => {
+    config.module.rules.push(
+      {
+        test: /\.worker\.js$/,
+        use: { loader: "worker-loader" }
+      }
+    )
+  },
+  parallel: false,
+  chainWebpack: config => {
+    config.output.globalObject('this')
   }
 }
